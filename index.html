@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>◈ TradeLog v2 — Public</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script>Babel.disableScriptTags=false;if(window.Babel&&Babel.registerPreset)try{var _warn=console.warn;console.warn=function(m){if(typeof m==="string"&&m.includes("in-browser Babel"))return;_warn.apply(console,arguments);};}catch(e){}</script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── PALETTE TRADINGVIEW ───────────────────────────────────────────
+       bg principal  : #04080f   (fond chart TV)
+       bg surface    : #0a0e1a   (panneau latéral TV)
+       bg card       : #0d1220   (carte/widget TV)
+       bg hover      : #1e2536
+       border        : rgba(0,180,255,0.15)   (séparateur TV)
+       border bright : rgba(0,200,255,0.35)
+       texte primary : #d1d4dc   (prix TV)
+       texte muted   : #787b86   (labels TV)
+       texte dim     : #434651
+       cyan bougie   : #00ff88   (bougie haussière TV — vert-cyan)
+       cyan bright   : #00cfff   (highlight)
+       rouge bougie  : #ef5350   (bougie baissière TV)
+       jaune accent  : #ffaa00   (alerte TV)
+       blanc bougie  : #b2b5be   (corps blanc neutre TV)
+    ──────────────────────────────────────────────────────────────────── */
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#04080f;color:#d1d4dc;font-family:'IBM Plex Sans',system-ui,sans-serif;}
+    ::-webkit-scrollbar{width:5px;}
+    ::-webkit-scrollbar-track{background:#04080f;}
+    ::-webkit-scrollbar-thumb{background:rgba(0,180,255,0.15);border-radius:3px;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(0,200,255,0.35);}
+    input,select,textarea{font-family:inherit;}
+    input::placeholder,textarea::placeholder{color:#434651;}
+    select option{background:#0a0e1a;}
+    .cal-cell:hover{background:#1e2536!important;}
+    .btn-cyan{background:#00ff88;box-shadow:0 0 12px rgba(0,255,136,0.4);border:none;border-radius:7px;color:#04080f;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s;}
+    .btn-cyan:hover{background:#00cfff;}
+    .btn-ghost{background:transparent;border:1px solid rgba(0,180,255,0.15);border-radius:7px;color:#a8aab4;padding:7px 13px;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
+    .btn-ghost:hover{border-color:rgba(0,200,255,0.35);color:#d1d4dc;}
+    .btn-danger{background:transparent;border:1px solid #3a1a1e;border-radius:7px;color:#ef5350;padding:7px 11px;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
+    .btn-danger:hover{background:#1a0d0e;border-color:#ef535060;}
+    .card{background:#0a0e1a;border:1px solid rgba(0,180,255,0.15);border-radius:12px;padding:18px 20px;}
+    .inp{background:#04080f;border:1px solid rgba(0,180,255,0.15);border-radius:7px;color:#d1d4dc;padding:8px 12px;font-size:13px;width:100%;outline:none;font-family:inherit;transition:border .15s;}
+    .inp:focus{border-color:#00ff88;}
+    .lbl{font-size:10px;color:#a8aab4;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;display:block;font-weight:600;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, useEffect, useRef } = React;
+
+const EMOTIONS   = ["😤 FOMO","😰 Fear","😎 Confident","🧘 Calm","🎯 Focused","😴 Tired","🤑 Greedy"];
+const STRATEGIES = ["Modèle 1 Monthly","Modèle 2 Monthly","Modèle 1 Weekly","Modèle 2 Weekly","Modèle 1 Daily","Modèle 2 Daily","Modèle 1 H4","Modèle 2 H4","Modèle 1 H1","Modèle 2 H1"];
+const SESSIONS   = ["London","New York","Asian","London/NY Overlap"];
+const MONTH_NAMES= ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+const DAY_NAMES  = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+
+// ── STOCKAGE (lecture seule — charge depuis data.json ou embarqué) ──
+function ls_get(k,def){try{const s=localStorage.getItem(k);return s?JSON.parse(s):def;}catch{return def;}}
+function ls_set(k,v){}
+
+let _EMBEDDED = window.TRADELOG_DATA || null;
+let _DATA_LOADED = false;
+
+function saveTrades(t){}
+function loadTrades(){return _EMBEDDED ? _EMBEDDED.trades || [] : [];}
+function saveAccounts(a){}
+function loadAccounts(){return _EMBEDDED ? _EMBEDDED.accounts || [] : [];}
+function saveWithdrawals(w){}
+function loadWithdrawals(){return _EMBEDDED ? _EMBEDDED.withdrawals || {} : {};}
+function loadAnnotations(){return {};}
+function saveAnnotations(trades){
+  const ann={};
+  trades.forEach(t=>{
+    if(t.source==="MT5"&&(t.emotion||t.strategy||t.notes||t.mistakes||(t.tags&&t.tags.length)||(t.screenshots&&t.screenshots.length))){
+      ann[String(t.mt5_position_id)]={emotion:t.emotion,strategy:t.strategy,notes:t.notes,mistakes:t.mistakes,tags:t.tags,screenshots:t.screenshots};
+    }
+  });
+  ls_set("tradelog_annotations",ann);
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────
+function fmtPnl(v){const abs=Math.abs(v);const s="$"+abs.toFixed(2);return(v<0?"-":"")+s;}
+function normDate(d){if(!d||d==="")return"";return String(d).replace(/^(\d{4})\.(\d{2})\.(\d{2})/,"$1-$2-$3");}
+
+const mkEmpty=(accountId="")=>({
+  date:new Date().toISOString().split("T")[0],
+  symbol:"",direction:"LONG",entry:"",exit:"",size:"",
+  pnl:"",rr:"",emotion:"",strategy:"",session:"",
+  notes:"",mistakes:"",tags:[],screenshots:[],accountId
+});
+
+// ── COMPOSANTS ───────────────────────────────────────────────────────
+function Gauge({value,max,color,size=52}){
+  const pct=Math.min(value/max,1);
+  const r=size*0.38,cx=size/2,cy=size/2;
+  const sa=-Math.PI*0.75,ea=Math.PI*0.75;
+  const aa=sa+pct*(ea-sa);
+  const x1=cx+r*Math.cos(sa),y1=cy+r*Math.sin(sa);
+  const x2=cx+r*Math.cos(ea),y2=cy+r*Math.sin(ea);
+  const vx=cx+r*Math.cos(aa),vy=cy+r*Math.sin(aa);
+  const bgArc=`M ${x1} ${y1} A ${r} ${r} 0 1 1 ${x2} ${y2}`;
+  const fgArc=`M ${x1} ${y1} A ${r} ${r} 0 ${pct>(1/1.5)?1:0} 1 ${vx} ${vy}`;
+  return <svg width={size} height={size} style={{display:"block"}}>
+    <path d={bgArc} fill="none" stroke="rgba(0,180,255,0.15)" strokeWidth={4} strokeLinecap="round"/>
+    {pct>0&&<path d={fgArc} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round"/>}
+  </svg>;
+}
+
+// ── ÉCRAN DE BIENVENUE ────────────────────────────────────────────────
+function Welcome({onAdd}){
+  const [tab,setTab]=useState("mt5");
+  const [name,setName]=useState("");
+  const [login,setLogin]=useState("");
+  const [capital,setCapital]=useState("");
+  const [err,setErr]=useState("");
+  function submit(){
+    if(!name.trim()){setErr("Entre un nom de compte.");return;}
+    if(tab==="mt5"&&!login.trim()){setErr("Entre ton numéro de compte MT5.");return;}
+    onAdd(name.trim(),tab==="mt5"?login.trim():"",parseFloat(capital)||0);
+  }
+  const TABS=[["mt5","MT5 Auto"],["manual","Manuel"]];
+  return(
+    <div style={{minHeight:"100vh",background:"#04080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32}}>
+
+      {/* Logo */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
+        <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:26,color:"#00ff88"}}>◈</span>
+        <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:26,color:"#d1d4dc",letterSpacing:-1}}>TradeLog <span style={{color:"#00ff88"}}>v2</span></span>
+      </div>
+      <div style={{color:"rgba(0,200,255,0.35)",fontSize:13,marginBottom:40,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:600}}>Journal de trading</div>
+
+      {/* Card principale */}
+      <div style={{background:"#04080f",border:"1px solid #1e1e1e",borderRadius:20,width:"100%",maxWidth:460,overflow:"hidden",boxShadow:"0 24px 64px rgba(0,0,0,.6)"}}>
+
+        {/* Header card avec onglets — même style que nav principale */}
+        <div style={{background:"#04080f",borderBottom:"1px solid #1a1a1a",padding:"0 0",display:"flex",alignItems:"center",height:52}}>
+          <div style={{padding:"0 20px",fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:"rgba(0,200,255,0.35)",borderRight:"1px solid #1a1a1a",height:"100%",display:"flex",alignItems:"center",whiteSpace:"nowrap"}}>
+            Nouveau compte
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:2,padding:"0 12px",height:"100%"}}>
+            {TABS.map(([k,l])=>(
+              <button key={k} onClick={()=>{setTab(k);setErr("");}}
+                style={{
+                  background:tab===k?"#0d1220":"transparent",
+                  border:tab===k?"1px solid #2a2a2a":"1px solid transparent",
+                  borderRadius:8,
+                  color:tab===k?"#00ff88":"#434651",
+                  padding:"5px 16px",
+                  fontSize:13,
+                  cursor:"pointer",
+                  fontWeight:tab===k?700:400,
+                  fontFamily:"inherit",
+                  transition:"all .15s"
+                }}>
+                {k==="mt5"?"📡 "+l:"✏️ "+l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Corps du formulaire */}
+        <div style={{padding:"28px 32px"}}>
+
+          {tab==="mt5"&&(
+            <div style={{fontSize:12,color:"#8b8e99",marginBottom:22,lineHeight:1.7,background:"#0a0e1a",border:"1px solid #1a1a1a",borderRadius:8,padding:"10px 14px"}}>
+              Place <span style={{color:"#00ff88",fontFamily:"monospace",fontSize:11}}>TradeLogExport.mq5</span> dans MT5 puis renseigne ton numéro de compte pour la synchro automatique.
+            </div>
+          )}
+          {tab==="manual"&&(
+            <div style={{fontSize:12,color:"#8b8e99",marginBottom:22,lineHeight:1.7,background:"#0a0e1a",border:"1px solid #1a1a1a",borderRadius:8,padding:"10px 14px"}}>
+              Saisie manuelle — tu pourras ajouter tes trades directement depuis le calendrier sans connexion MT5.
+            </div>
+          )}
+
+          <div style={{marginBottom:16}}>
+            <label className="lbl">Nom du compte</label>
+            <input className="inp" value={name} onChange={e=>setName(e.target.value)}
+              placeholder={tab==="mt5"?"Ex: Funded ICT · Prop firm":"Ex: Compte personnel"}
+              onKeyDown={e=>e.key==="Enter"&&submit()}/>
+          </div>
+
+          {tab==="mt5"&&(
+            <div style={{marginBottom:16}}>
+              <label className="lbl">Numéro de compte MT5</label>
+              <input className="inp" value={login} onChange={e=>setLogin(e.target.value.replace(/\D/g,""))}
+                placeholder="Ex: 5044479"
+                onKeyDown={e=>e.key==="Enter"&&submit()}/>
+              <div style={{fontSize:11,color:"rgba(0,200,255,0.35)",marginTop:5}}>Visible dans MT5 → coin supérieur droit</div>
+            </div>
+          )}
+
+          <div style={{marginBottom:24}}>
+            <label className="lbl">Capital d'origine ($)</label>
+            <div style={{position:"relative"}}>
+              <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#8b8e99",fontSize:14,fontFamily:"monospace",pointerEvents:"none"}}>$</span>
+              <input className="inp" type="number" step="0.01" value={capital}
+                onChange={e=>setCapital(e.target.value)}
+                placeholder="10 000.00"
+                onKeyDown={e=>e.key==="Enter"&&submit()}
+                style={{paddingLeft:28}}/>
+            </div>
+            <div style={{fontSize:11,color:"rgba(0,200,255,0.35)",marginTop:5}}>Montant déposé au départ — pour le suivi de croissance %</div>
+          </div>
+
+          {err&&(
+            <div style={{background:"#1a0808",border:"1px solid #3a1a1a",borderRadius:8,padding:"9px 14px",fontSize:12,color:"#ef5350",marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
+              <span>⚠</span>{err}
+            </div>
+          )}
+
+          <button className="btn-cyan" style={{width:"100%",padding:"13px",fontSize:14,fontWeight:700,letterSpacing:".02em"}} onClick={submit}>
+            {tab==="mt5"?"Connecter le compte →":"Créer le compte →"}
+          </button>
+        </div>
+
+      </div>
+
+      {/* Footer info */}
+      <div style={{marginTop:24,color:"rgba(0,180,255,0.25)",fontSize:11,textAlign:"center",maxWidth:400,lineHeight:1.9}}>
+        {tab==="mt5"
+          ? <>Fichier JSON <span style={{color:"rgba(0,180,255,0.25)",fontFamily:"monospace"}}>mt5_trades_XXXXXX.json</span> dans le même dossier que ce fichier HTML<br/>ou dans <span style={{color:"rgba(0,180,255,0.25)",fontFamily:"monospace"}}>MQL5\Files\</span> de ton terminal MT5.</>
+          : "Tu pourras connecter MT5 plus tard depuis les paramètres du compte."
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── FORMULAIRE TRADE INLINE ────────────────────────────────────────────
+function TradeForm({initial,onSave,onCancel,title}){
+  const [f,setF]=useState(initial);
+  const set=k=>v=>setF(p=>({...p,[k]:v}));
+  function valid(){return f.symbol&&(f.pnl!=="");}
+  return(
+    <div style={{background:"#04080f",border:"1px solid #00ff88",borderRadius:12,padding:20,marginBottom:8}}>
+      {title&&<div style={{fontSize:13,fontWeight:700,color:"#00ff88",marginBottom:16}}>{title}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label className="lbl">Symbole *</label>
+          <input className="inp" value={f.symbol} onChange={e=>set("symbol")(e.target.value.toUpperCase())} placeholder="EURUSD"/>
+        </div>
+        <div>
+          <label className="lbl">Direction</label>
+          <select className="inp" value={f.direction} onChange={e=>set("direction")(e.target.value)} style={{cursor:"pointer"}}>
+            <option>LONG</option><option>SHORT</option>
+          </select>
+        </div>
+        <div>
+          <label className="lbl">P&amp;L * ($)</label>
+          <input className="inp" type="number" step="0.01" value={f.pnl} onChange={e=>set("pnl")(e.target.value)} placeholder="0.00"/>
+        </div>
+        <div>
+          <label className="lbl">R:R</label>
+          <input className="inp" type="number" step="0.1" value={f.rr} onChange={e=>set("rr")(e.target.value)} placeholder="0.0"/>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label className="lbl">Entrée</label>
+          <input className="inp" type="number" step="any" value={f.entry} onChange={e=>set("entry")(e.target.value)}/>
+        </div>
+        <div>
+          <label className="lbl">Sortie</label>
+          <input className="inp" type="number" step="any" value={f.exit} onChange={e=>set("exit")(e.target.value)}/>
+        </div>
+        <div>
+          <label className="lbl">Taille</label>
+          <input className="inp" type="number" step="0.01" value={f.size} onChange={e=>set("size")(e.target.value)} placeholder="0.01"/>
+        </div>
+        <div>
+          <label className="lbl">Session</label>
+          <select className="inp" value={f.session} onChange={e=>set("session")(e.target.value)} style={{cursor:"pointer"}}>
+            <option value="">—</option>{SESSIONS.map(s=><option key={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label className="lbl">Stratégie</label>
+        <select className="inp" value={f.strategy} onChange={e=>set("strategy")(e.target.value)} style={{cursor:"pointer"}}>
+          <option value="">—</option>{STRATEGIES.map(s=><option key={s}>{s}</option>)}
+        </select>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label className="lbl">Émotion</label>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {EMOTIONS.map(e=><button key={e} onClick={()=>set("emotion")(f.emotion===e?"":e)}
+            style={{background:f.emotion===e?"rgba(0,180,255,0.15)":"transparent",border:"1px solid "+(f.emotion===e?"#00ff88":"rgba(0,180,255,0.15)"),borderRadius:6,color:f.emotion===e?"#00ff88":"#434651",padding:"5px 10px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{e}</button>)}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div>
+          <label className="lbl">Notes</label>
+          <textarea className="inp" value={f.notes} onChange={e=>set("notes")(e.target.value)} rows={2} placeholder="Notes..." style={{resize:"vertical"}}/>
+        </div>
+        <div>
+          <label className="lbl">Erreurs / Leçons</label>
+          <textarea className="inp" value={f.mistakes} onChange={e=>set("mistakes")(e.target.value)} rows={2} placeholder="Qu'aurais-tu pu faire mieux ?" style={{resize:"vertical"}}/>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+        <button className="btn-cyan" onClick={()=>valid()&&onSave(f)} style={{opacity:valid()?1:0.4}}>✅ Sauvegarder</button>
+      </div>
+    </div>
+  );
+}
+
+// ── ROOT — version publique : fetch data.json auto-refresh ──────────
+function App(){
+  const [accounts,setAccountsRaw]=useState(loadAccounts);
+  const [loading,setLoading]=useState(!_EMBEDDED);
+  const [lastUpdate,setLastUpdate]=useState(null);
+  const [error,setError]=useState(null);
+
+  function setAccounts(fn){
+    setAccountsRaw(prev=>{
+      const next=typeof fn==="function"?fn(prev):fn;
+      return next;
+    });
+  }
+
+  // Fetch data.json (au chargement + toutes les 60s)
+  function fetchData(){
+    fetch("data.json?t="+Date.now())
+      .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+      .then(data=>{
+        _EMBEDDED=data;
+        setAccountsRaw(data.accounts||[]);
+        setLastUpdate(data.exported_at||new Date().toLocaleString("fr-FR"));
+        setLoading(false);
+        setError(null);
+      })
+      .catch(e=>{
+        // Si data.json n'existe pas, garder les données embarquées
+        if(_EMBEDDED){setLoading(false);return;}
+        setError(e.message);
+        setLoading(false);
+      });
+  }
+
+  useEffect(()=>{
+    if(!_EMBEDDED){
+      fetchData();
+      const t=setInterval(fetchData,60000);
+      return()=>clearInterval(t);
+    }
+  },[]);
+
+  if(loading){
+    return(
+      <div style={{minHeight:"100vh",background:"#04080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+        <div style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:22,color:"#00ff88"}}>◈ TradeLog</div>
+        <div style={{color:"#8b8e99",fontSize:13}}>Chargement des données...</div>
+      </div>
+    );
+  }
+
+  if(accounts.length===0&&error){
+    return(
+      <div style={{minHeight:"100vh",background:"#04080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+        <div style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:22,color:"#00ff88"}}>◈ TradeLog</div>
+        <div style={{color:"#8b8e99",fontSize:13}}>Aucune donnée disponible.</div>
+      </div>
+    );
+  }
+
+  return <AppMain accounts={accounts} setAccounts={setAccounts} initialAccountId={null} lastUpdate={lastUpdate}/>;
+}
+
+// ── APP PRINCIPALE ─────────────────────────────────────────────────────
+function AppMain({accounts,setAccounts,initialAccountId,lastUpdate}){
+  const [trades,setTradesRaw]   = useState(loadTrades);
+  const [withdrawals,setWithdrawalsRaw] = useState(loadWithdrawals);
+
+  // Re-sync trades/withdrawals quand _EMBEDDED change (auto-refresh)
+  useEffect(()=>{
+    if(_EMBEDDED){
+      setTradesRaw(_EMBEDDED.trades||[]);
+      setWithdrawalsRaw(_EMBEDDED.withdrawals||{});
+    }
+  },[lastUpdate]);
+  const [view,setView]          = useState("dashboard");
+  const [calMonth,setCalMonth]  = useState(()=>({year:new Date().getFullYear(),month:new Date().getMonth()}));
+  const [calSelected,setCalSelected]=useState(null);
+  const [calAccount,setCalAccount]=useState(()=>initialAccountId||"all");
+  const [mt5Status,setMt5Status]=useState("");
+  const [lightbox,setLightbox]  = useState(null);
+
+  // Gestion compte sidebar
+  const [showAddAccount,setShowAddAccount]=useState(false);
+  const [newAccName,setNewAccName]=useState("");
+  const [newAccLogin,setNewAccLogin]=useState("");
+  const [renamingId,setRenamingId]=useState(null);
+  const [renameVal,setRenameVal]=useState("");
+
+  // Formulaire trade inline
+  const [editTradeId,setEditTradeId]=useState(null); // id du trade en édition
+  const [addingForDate,setAddingForDate]=useState(null); // date pour nouveau trade
+  const [editForm,setEditForm]=useState(null);
+  const [newForm,setNewForm]=useState(null);
+
+  // ── LECTURE SEULE (version publique — pas d'écriture localStorage) ──
+  function setTrades(fn){
+    setTradesRaw(prev=>{
+      const next=typeof fn==="function"?fn(prev):fn;
+      return next;
+    });
+  }
+  function setWithdrawals(fn){
+    setWithdrawalsRaw(prev=>{
+      const next=typeof fn==="function"?fn(prev):fn;
+      return next;
+    });
+  }
+
+  // ── MERGE TRADES MT5 ─────────────────────────────────────────────
+  function mergeMT5Trades(raw,accountId,accountName,data){
+    if(!raw.length){setMt5Status("⚠️ Fichier vide — compte "+accountId);return;}
+    setMt5Status("✅ "+raw.length+" trades chargés ("+accountName+")");
+    setTimeout(()=>setMt5Status(""),5000);
+    // Mettre à jour ou créer le compte (balance rafraîchie à chaque poll)
+    setAccounts(prev=>{
+      const existing=prev.find(a=>a.id===accountId);
+      const newBalance=data&&data.balance!=null?data.balance:null;
+      if(existing){
+        // Mettre à jour la balance MT5 sans écraser le nom ni le capital
+        return prev.map(a=>a.id===accountId?{...a,balance:newBalance}:a);
+      }
+      return [...prev,{id:accountId,name:accountName,balance:newBalance}];
+    });
+    setTrades(prev=>{
+      const anns=loadAnnotations();
+      const existMap={};
+      prev.forEach(t=>{if(t.mt5_position_id)existMap[String(t.mt5_position_id)]=t;});
+      const kept=prev.filter(t=>!(t.source==="MT5"&&t.accountId===accountId));
+      raw.forEach((t,i)=>{
+        const posId=String(t.mt5_position_id||t.id||"");
+        const saved=existMap[posId]||{};
+        const ann=anns[posId]||{};
+        const base=Object.keys(saved).length?saved:ann;
+        const nc=normDate(t.close_time||"");
+        const nd=normDate(t.date||"");
+        const fd=(nc&&nc!=="")?nc.split(" ")[0]:nd||new Date().toISOString().split("T")[0];
+        const pnlVal=t.pnl!=null&&t.pnl!==""?parseFloat(t.pnl):(t.profit!=null?parseFloat(t.profit):0);
+        kept.push({
+          id:t.mt5_position_id||(Date.now()+i),
+          mt5_position_id:t.mt5_position_id||null,
+          date:fd,close_time:nc,
+          symbol:t.symbol||"",direction:t.direction||"LONG",
+          entry:t.entry!=null?Number(t.entry):0,
+          exit:t.exit!=null?Number(t.exit):0,
+          size:Number(t.size||t.volume)||0,
+          pnl:isNaN(pnlVal)?0:pnlVal,
+          rr:Number(t.rr)||0,
+          session:base.session||t.session||"",
+          strategy:base.strategy||t.strategy||"",
+          emotion:base.emotion||t.emotion||"",
+          notes:base.notes||t.notes||"",
+          mistakes:base.mistakes||t.mistakes||"",
+          tags:base.tags||t.tags||[],
+          screenshots:base.screenshots||t.screenshots||[],
+          source:"MT5",status:t.status||"CLOSED",accountId,
+        });
+      });
+      return kept;
+    });
+  }
+
+  // ── FETCH MT5 JSON ───────────────────────────────────────────────
+  function fetchMT5Login(login){
+    const accountId="mt5_"+login;
+    fetch("mt5_trades_"+login+".json?t="+Date.now())
+      .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+      .then(data=>{
+        const raw=Array.isArray(data)?data:(data.trades||[]);
+        const name=data.account_name||("Compte "+login);
+        mergeMT5Trades(raw,accountId,name,data);
+      })
+      .catch(e=>{
+        console.warn("[TradeLog] Fetch mt5_trades_"+login+".json échoué:",e.message);
+      });
+  }
+
+  // ── POLLING AUTO (désactivé si données embarquées) ─────────────────
+  useEffect(()=>{
+    if(_EMBEDDED) return; // Données embarquées — pas de polling
+    function pollAll(){
+      const logins=ls_get("tradelog_mt5_logins",[]);
+      logins.forEach(l=>fetchMT5Login(String(l)));
+    }
+    pollAll();
+    const t=setInterval(pollAll,10000);
+    return()=>clearInterval(t);
+  },[]);
+
+  // Lance le fetch MT5 si on vient de créer le premier compte depuis Welcome
+  useEffect(()=>{
+    if(_EMBEDDED) return;
+    if(initialAccountId&&initialAccountId.startsWith("mt5_")){
+      const login=initialAccountId.replace("mt5_","");
+      fetchMT5Login(login);
+    }
+  },[initialAccountId]);
+
+  // ── AJOUTER UN COMPTE ────────────────────────────────────────────
+  function addAccount(name,login,initialCapital){
+    const id=login?"mt5_"+login:"acc_"+Date.now();
+    if(accounts.find(a=>a.id===id))return;
+    setAccounts(prev=>[...prev,{id,name,initialCapital:initialCapital||0}]);
+    if(login){
+      const logins=ls_get("tradelog_mt5_logins",[]);
+      if(!logins.includes(login)){ls_set("tradelog_mt5_logins",[...logins,login]);}
+      fetchMT5Login(login);
+    }
+    setCalAccount(id);
+    setNewAccName("");setNewAccLogin("");setShowAddAccount(false);
+  }
+
+  function deleteAccount(id){
+    setAccounts(prev=>prev.filter(a=>a.id!==id));
+    if(id.startsWith("mt5_")){
+      const login=id.replace("mt5_","");
+      const logins=ls_get("tradelog_mt5_logins",[]).filter(l=>String(l)!==String(login));
+      ls_set("tradelog_mt5_logins",logins);
+    }
+    setTrades(prev=>prev.filter(t=>(t.accountId||"")!==id));
+    if(calAccount===id)setCalAccount("all");
+  }
+
+  function renameAccount(id){
+    const name=renameVal.trim();
+    if(!name)return;
+    setAccounts(prev=>prev.map(a=>a.id===id?{...a,name}:a));
+    setRenamingId(null);setRenameVal("");
+  }
+
+  // ── STATS ────────────────────────────────────────────────────────
+  const todayStr=new Date().toLocaleDateString("en-CA");
+
+  // Trades filtrés pour le compte sélectionné
+  const accountTrades=useMemo(()=>
+    calAccount==="all"?trades:trades.filter(t=>(t.accountId||"")===calAccount),
+  [trades,calAccount]);
+
+  const dashStats=useMemo(()=>{
+    const closed=accountTrades.filter(t=>t.status!=="OPEN");
+    const open  =accountTrades.filter(t=>t.status==="OPEN");
+    const wins  =closed.filter(t=>Number(t.pnl)>0);
+    const losses=closed.filter(t=>Number(t.pnl)<0);
+    const totalPnl=closed.reduce((s,t)=>s+Number(t.pnl),0);
+    const openPnl =open.reduce((s,t)=>s+Number(t.pnl),0);
+    const winRate =closed.length?wins.length/closed.length*100:0;
+    const avgWin  =wins.length?wins.reduce((s,t)=>s+Number(t.pnl),0)/wins.length:0;
+    const avgLoss =losses.length?Math.abs(losses.reduce((s,t)=>s+Number(t.pnl),0)/losses.length):0;
+    const profitFactor=avgLoss>0?(avgWin*wins.length)/(avgLoss*losses.length):0;
+
+    const dayMap={};
+    closed.forEach(t=>{
+      const dk=(t.close_time&&t.close_time!=="")?t.close_time.split(" ")[0]:t.date;
+      if(!dk)return;
+      if(!dayMap[dk]){dayMap[dk]={pnl:0,count:0,wins:0};}
+      dayMap[dk].pnl+=Number(t.pnl);dayMap[dk].count++;
+      if(Number(t.pnl)>0)dayMap[dk].wins++;
+    });
+    const dayEntries=Object.entries(dayMap).sort(([a],[b])=>a.localeCompare(b));
+    const winDays=dayEntries.filter(([,d])=>d.pnl>0).length;
+    const dayWinRate=dayEntries.length?winDays/dayEntries.length*100:0;
+
+    let cumul=0,peak=0,maxDD=0;
+    const cumulData=dayEntries.map(([date,d])=>{cumul+=d.pnl;return{date,cumul,daily:d.pnl};});
+    cumulData.forEach(p=>{if(p.cumul>peak)peak=p.cumul;const dd=peak>0?(p.cumul-peak)/peak*100:0;if(dd<maxDD)maxDD=dd;});
+
+    const monthlyMap={};
+    closed.forEach(t=>{
+      const dk=(t.close_time&&t.close_time!=="")?t.close_time.split(" ")[0]:t.date;
+      if(!dk)return;
+      const ym=dk.slice(0,7);
+      if(!monthlyMap[ym])monthlyMap[ym]=0;
+      monthlyMap[ym]+=Number(t.pnl);
+    });
+    const monthlyEntries=Object.entries(monthlyMap).sort(([a],[b])=>a.localeCompare(b));
+
+    return{closed,open,wins,losses,totalPnl,openPnl,winRate,avgWin,avgLoss,profitFactor,dayEntries,winDays,dayWinRate,cumulData,maxDD,monthlyEntries};
+  },[accountTrades]);
+
+  // ── CALENDRIER DATA ───────────────────────────────────────────────
+  const calData=useMemo(()=>{
+    const{year,month}=calMonth;
+    const dayMap={};
+    accountTrades.filter(t=>t.status!=="OPEN").forEach(t=>{
+      const dk=(t.close_time&&t.close_time!=="")?t.close_time.split(" ")[0]:t.date;
+      if(!dk)return;
+      const p=dk.split("-");
+      if(parseInt(p[0])===year&&parseInt(p[1])-1===month){
+        if(!dayMap[dk])dayMap[dk]={pnl:0,count:0,wins:0,trades:[]};
+        const tp=parseFloat(t.pnl)||0;
+        dayMap[dk].pnl+=tp;dayMap[dk].count++;
+        if(tp>0)dayMap[dk].wins++;
+        dayMap[dk].trades.push({...t,pnl:tp});
+      }
+    });
+    const daysInMonth=new Date(year,month+1,0).getDate();
+    const firstDayRaw=new Date(year,month,1).getDay();
+    const firstDay=firstDayRaw===0?6:firstDayRaw-1;
+    const cells=[];
+    for(let i=0;i<firstDay;i++)cells.push(null);
+    for(let d=1;d<=daysInMonth;d++){
+      const ds=year+"-"+String(month+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+      cells.push({d,dateStr:ds,data:dayMap[ds]||null});
+    }
+    while(cells.length%7!==0)cells.push(null);
+    const weeks=[];for(let i=0;i<cells.length;i+=7)weeks.push(cells.slice(i,i+7));
+    const monthPnl=Object.values(dayMap).reduce((s,d)=>s+d.pnl,0);
+    const weekSummaries=weeks.map((wk,wi)=>{
+      const days=wk.filter(Boolean).filter(c=>c.data);
+      return{pnl:days.reduce((s,c)=>s+c.data.pnl,0),tradeDays:days.length,weekNum:wi+1};
+    });
+    return{weeks,weekSummaries,monthPnl,tradingDays:Object.keys(dayMap).length,dayMap};
+  },[accountTrades,calMonth]);
+
+  // ── HEAT MAP ─────────────────────────────────────────────────────
+  const heatWeeks=useMemo(()=>{
+    const{dayMap}=calData;
+    const allDayMap={};
+    accountTrades.filter(t=>t.status!=="OPEN").forEach(t=>{
+      const dk=(t.close_time&&t.close_time!=="")?t.close_time.split(" ")[0]:t.date;
+      if(!dk)return;
+      if(!allDayMap[dk]){allDayMap[dk]={pnl:0,count:0};}
+      allDayMap[dk].pnl+=Number(t.pnl);allDayMap[dk].count++;
+    });
+    const today=new Date();const weeks=[];
+    for(let w=9;w>=0;w--){
+      const week=[];
+      // Monday=0 ... Sunday=6
+      for(let d=0;d<7;d++){
+        const dt=new Date(today);
+        const dayOffset=today.getDay()===0?6:today.getDay()-1; // Mon offset
+        dt.setDate(today.getDate()-dayOffset-w*7+d);
+        const ds=dt.toLocaleDateString("en-CA");
+        week.push({date:ds,data:allDayMap[ds]||null});
+      }
+      weeks.push(week);
+    }
+    return weeks;
+  },[accountTrades]);
+
+  // ── GRAPHIQUES ────────────────────────────────────────────────────
+  const CW=300,CH=100;
+  function pp(pts){if(!pts.length)return"";return"M "+pts.map(p=>p.join(" ")).join(" L ");}
+  function pa(pts,h){if(!pts.length)return"";return pp(pts)+" L "+pts[pts.length-1][0]+" "+h+" L "+pts[0][0]+" "+h+" Z";}
+
+  const{cumulData,dayEntries,totalPnl,maxDD,monthlyEntries}=dashStats;
+
+  // ── CAPITAL & RETRAITS ────────────────────────────────────────────
+  const [showCapitalModal,setShowCapitalModal]=useState(false);
+  const [wdAmount,setWdAmount]=useState("");
+  const [wdDate,setWdDate]=useState(()=>new Date().toISOString().split("T")[0]);
+  const [wdNote,setWdNote]=useState("");
+
+  const currentAccount=accounts.find(a=>a.id===calAccount);
+  const initialCapital=calAccount==="all"
+    ? accounts.reduce((s,a)=>s+(a.initialCapital||0),0)
+    : (currentAccount?.initialCapital||0);
+
+  const accountWithdrawals=useMemo(()=>{
+    if(calAccount==="all"){
+      const all=[];
+      Object.values(withdrawals).forEach(arr=>{if(Array.isArray(arr))arr.forEach(w=>all.push(w));});
+      return all.sort((a,b)=>a.date.localeCompare(b.date));
+    }
+    return (withdrawals[calAccount]||[]).sort((a,b)=>a.date.localeCompare(b.date));
+  },[withdrawals,calAccount]);
+
+  const totalWithdrawn=accountWithdrawals.reduce((s,w)=>s+Number(w.amount),0);
+  const currentCapital=initialCapital+dashStats.totalPnl-totalWithdrawn;
+  const totalGainPct=initialCapital>0?((currentCapital-initialCapital)/initialCapital)*100:0;
+  const netGainAfterWd=dashStats.totalPnl-totalWithdrawn;
+
+  // Retraits par mois
+  const wdByMonth={};
+  accountWithdrawals.forEach(w=>{
+    const ym=w.date.slice(0,7);
+    if(!wdByMonth[ym])wdByMonth[ym]=0;
+    wdByMonth[ym]+=Number(w.amount);
+  });
+
+  function addWithdrawal(){
+    const amt=parseFloat(wdAmount);
+    if(!amt||amt<=0)return;
+    const accId=calAccount==="all"?(accounts[0]?.id||"acc_default"):calAccount;
+    const entry={id:Date.now(),date:wdDate,amount:amt,note:wdNote.trim()};
+    setWithdrawals(prev=>({...prev,[accId]:[...(prev[accId]||[]),entry]}));
+    setWdAmount("");setWdNote("");setShowCapitalModal(false);
+  }
+  function deleteWithdrawal(accId,wid){
+    setWithdrawals(prev=>({...prev,[accId]:(prev[accId]||[]).filter(w=>w.id!==wid)}));
+  }
+  const cMin=Math.min(...cumulData.map(d=>d.cumul),0);
+  const cMax=Math.max(...cumulData.map(d=>d.cumul),1);
+  const cRange=cMax-cMin||1;
+  const cPts=cumulData.map((d,i)=>[(i/Math.max(cumulData.length-1,1))*CW,CH-((d.cumul-cMin)/cRange)*CH]);
+  const dMax=Math.max(...dayEntries.map(([,d])=>Math.abs(d.pnl)),1);
+
+  // Radar Score
+  const{winRate,avgWin,avgLoss,profitFactor}=dashStats;
+  const consistency=Math.min(100,winRate);
+  const pfScore=Math.min(100,profitFactor*33);
+  const wlScore=avgLoss>0?Math.min(100,(avgWin/avgLoss)*50):50;
+  const ddScore=Math.max(0,100+maxDD*2);
+  const recScore=dashStats.losses.length>0?Math.min(100,(dashStats.wins.length/(dashStats.losses.length+dashStats.wins.length))*100):100;
+  const zellaScore=Math.round((consistency+pfScore+wlScore+ddScore+recScore)/5);
+  const RC=70,RR=52;
+  const radarAxes=[
+    {label:"Win %",val:consistency/100},{label:"P.Factor",val:pfScore/100},
+    {label:"Avg W/L",val:wlScore/100},{label:"Drawdown",val:ddScore/100},
+    {label:"Recovery",val:recScore/100},{label:"Consist.",val:Math.min(1,trades.length/20)},
+  ];
+  function rPt(i,r){const a=(i/radarAxes.length)*Math.PI*2-Math.PI/2;return[RC+Math.cos(a)*r,RC+Math.sin(a)*r];}
+  const vPts=radarAxes.map((a,i)=>rPt(i,RR*a.val));
+  const poly=vPts.map(p=>p.join(",")).join(" ");
+
+  // Camembert paires
+  const pairMap={};
+  dashStats.closed.forEach(t=>{const s=t.symbol||"?";if(!pairMap[s])pairMap[s]={count:0,pnl:0};pairMap[s].count++;pairMap[s].pnl+=Number(t.pnl);});
+  const pairList=Object.entries(pairMap).sort(([,a],[,b])=>b.count-a.count);
+  const PIE_C=["#00ff88","#60a5fa","#f472b6","#ffaa00","#818cf8","#34d399","#fb923c","#e879f9","#38bdf8","#facc15","#ef5350","#818cf8"];
+  function PieChart({sz=140}){
+    if(!pairList.length)return<div style={{width:sz,height:sz,borderRadius:"50%",background:"#0d1220",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{color:"rgba(0,200,255,0.35)",fontSize:11}}>Aucun</span></div>;
+    const tot=pairList.reduce((s,[,d])=>s+d.count,0);
+    let ang=0;
+    const slices=pairList.map(([sym,d],i)=>{
+      const pct=d.count/tot;const s=ang*2*Math.PI-Math.PI/2;const e=(ang+pct)*2*Math.PI-Math.PI/2;
+      const r=sz/2-3,cx=sz/2,cy=sz/2;
+      const x1=cx+r*Math.cos(s),y1=cy+r*Math.sin(s),x2=cx+r*Math.cos(e),y2=cy+r*Math.sin(e);
+      const large=pct>0.5?1:0;
+      const path=pct>=0.999?`M ${cx-r} ${cy} a ${r} ${r} 0 1 1 ${r*2} 0 a ${r} ${r} 0 1 1 -${r*2} 0`:`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+      ang+=pct;
+      return{path,color:PIE_C[i%PIE_C.length]};
+    });
+    return<svg width={sz} height={sz}><circle cx={sz/2} cy={sz/2} r={sz/2-3} fill="#04080f"/>{slices.map((s,i)=><path key={i} d={s.path} fill={s.color} opacity={0.85} stroke="#0a0e1a" strokeWidth={1.5}/>)}<circle cx={sz/2} cy={sz/2} r={sz/4} fill="#0a0e1a"/></svg>;
+  }
+
+  const card=ch=><div className="card">{ch}</div>;
+  const lbl=t=><div className="lbl">{t}</div>;
+
+  // ── COMPOSANT formulaire ajout compte (hooks valides hors render) ──
+  function AddAccountForm(){
+    const [ct,setCt]=useState("mt5");
+    const [nn,setNn]=useState("");
+    const [nl,setNl]=useState("");
+    const [nc,setNc]=useState("");
+    const [er,setEr]=useState("");
+    const CTABS=[["mt5","📡 MT5 Auto"],["manual","✏️ Manuel"]];
+    function doAdd(){
+      if(!nn.trim()){setEr("Nom requis");return;}
+      if(ct==="mt5"&&!nl.trim()){setEr("N° MT5 requis");return;}
+      addAccount(nn.trim(),ct==="mt5"?nl.trim():"",parseFloat(nc)||0);
+      setNn("");setNl("");setNc("");setEr("");
+    }
+    return(
+      <div style={{background:"#04080f",border:"1px solid #1e1e1e",borderRadius:16,overflow:"hidden"}}>
+        <div style={{background:"#04080f",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",height:48}}>
+          <div style={{padding:"0 20px",fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:"rgba(0,200,255,0.35)",borderRight:"1px solid #1a1a1a",height:"100%",display:"flex",alignItems:"center",whiteSpace:"nowrap"}}>
+            + Ajouter compte
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:2,padding:"0 10px",height:"100%"}}>
+            {CTABS.map(([k,l])=>(
+              <button key={k} onClick={()=>{setCt(k);setEr("");}}
+                style={{background:ct===k?"#0d1220":"transparent",border:"none",borderBottom:ct===k?"2px solid #00ff88":"2px solid transparent",borderRadius:0,color:ct===k?"#00ff88":"#434651",padding:"0 12px",height:"100%",fontSize:12,cursor:"pointer",fontWeight:ct===k?700:400,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{padding:"20px 22px"}}>
+          {ct==="mt5"&&<div style={{fontSize:11,color:"rgba(0,200,255,0.35)",marginBottom:14,lineHeight:1.6,background:"#0a0e1a",border:"1px solid #1a1a1a",borderRadius:7,padding:"9px 12px"}}>
+            Place <span style={{color:"#00ff88",fontFamily:"monospace",fontSize:10}}>TradeLogExport.mq5</span> dans MT5 puis sync auto via JSON.
+          </div>}
+          <div style={{marginBottom:12}}>
+            <label className="lbl">Nom du compte</label>
+            <input className="inp" value={nn} onChange={e=>setNn(e.target.value)} placeholder={ct==="mt5"?"Ex: Funded ICT":"Ex: Perso"} onKeyDown={e=>e.key==="Enter"&&doAdd()}/>
+          </div>
+          {ct==="mt5"&&<div style={{marginBottom:12}}>
+            <label className="lbl">N° compte MT5</label>
+            <input className="inp" value={nl} onChange={e=>setNl(e.target.value.replace(/\D/g,""))} placeholder="Ex: 5044479" onKeyDown={e=>e.key==="Enter"&&doAdd()}/>
+          </div>}
+          <div style={{marginBottom:16}}>
+            <label className="lbl">Capital d'origine ($)</label>
+            <input className="inp" type="number" step="0.01" value={nc} onChange={e=>setNc(e.target.value)} placeholder="Ex: 10000" onKeyDown={e=>e.key==="Enter"&&doAdd()}/>
+          </div>
+          {er&&<div style={{background:"#1a0808",border:"1px solid #3a1a1a",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#ef5350",marginBottom:12}}>{er}</div>}
+          <button className="btn-cyan" style={{width:"100%",padding:"10px"}} onClick={doAdd}>
+            {ct==="mt5"?"Connecter →":"Créer →"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RENDER PRINCIPAL ─────────────────────────────────────────────
+  return(
+    <div style={{minHeight:"100vh",background:"#04080f",color:"#d1d4dc"}}>
+
+      {/* ── HEADER ── */}
+      <div style={{background:"#04080f",borderBottom:"1px solid #1a1a1a",padding:"0 32px",display:"flex",alignItems:"center",gap:0,height:56,position:"sticky",top:0,zIndex:100}}>
+
+        {/* Logo */}
+        <div style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:17,marginRight:32,whiteSpace:"nowrap"}}>
+          <span style={{color:"#00ff88"}}>◈</span> <span style={{color:"#d1d4dc"}}>Trade</span><span style={{color:"#00ff88"}}>Log</span>
+        </div>
+
+        {/* Nav onglets */}
+        <nav style={{display:"flex",alignItems:"center",gap:2,height:"100%"}}>
+          {[
+            ["dashboard","📊","Dashboard"],
+            ["calendar","📅","Calendrier"],
+          ].map(([k,icon,l])=>(
+            <button key={k} onClick={()=>setView(k)}
+              style={{
+                background:view===k?"#0d1220":"transparent",
+                border:"none",
+                borderBottom:view===k?"2px solid #00ff88":"2px solid transparent",
+                borderRadius:0,
+                color:view===k?"#00ff88":"#434651",
+                padding:"0 18px",
+                height:"100%",
+                fontSize:13,
+                cursor:"pointer",
+                fontWeight:view===k?700:400,
+                fontFamily:"inherit",
+                display:"flex",
+                alignItems:"center",
+                gap:7,
+                transition:"color .15s",
+                whiteSpace:"nowrap",
+              }}>
+              <span style={{fontSize:14}}>{icon}</span>{l}
+            </button>
+          ))}
+        </nav>
+
+        {/* Droite — P&L ouvert + status */}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:16}}>
+          {mt5Status&&<div style={{fontSize:11,color:"#00ff88",fontWeight:600,maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mt5Status}</div>}
+          {(()=>{const p=accountTrades.filter(t=>t.status==="OPEN").reduce((s,t)=>s+Number(t.pnl),0);const col=p>=0?"0,255,136":"239,83,80";return(
+            <div style={{background:"rgba("+col+",0.07)",border:"1px solid rgba("+col+",0.4)",borderRadius:8,padding:"5px 14px",display:"flex",alignItems:"center",gap:8,boxShadow:"0 0 16px rgba("+col+",0.25)"}}>
+              <span style={{fontSize:8,color:"rgba("+col+",0.6)",letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>● OPEN</span>
+              <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:13,color:"rgba("+col+",1)",textShadow:"0 0 8px rgba("+col+",1)"}}>
+                {(p>=0?"+":"")+p.toFixed(2)+"$"}
+              </span>
+            </div>);})()}
+          <div style={{background:"rgba(0,200,255,0.08)",border:"1px solid rgba(0,200,255,0.3)",borderRadius:8,padding:"5px 14px",display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:9,color:"#00cfff",letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>PUBLIC</span>
+            {lastUpdate&&<span style={{fontSize:9,color:"#8b8e99"}}>·  màj {lastUpdate}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div style={{padding:"28px 32px",maxWidth:1320,margin:"0 auto"}}>
+
+        {/* ── BARRE COMPTES (lecture seule) ── */}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,padding:"10px 14px",background:"#04080f",border:"1px solid #1a1a1a",borderRadius:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"#8b8e99",letterSpacing:1.5,textTransform:"uppercase",whiteSpace:"nowrap",fontWeight:600}}>Compte</span>
+          <select value={calAccount} onChange={e=>{setCalAccount(e.target.value);setCalSelected(null);}}
+            style={{background:"#0a0e1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#d1d4dc",padding:"7px 14px",fontSize:14,outline:"none",cursor:"pointer",minWidth:180}}>
+            <option value="all">Tous les comptes</option>
+            {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════
+            DASHBOARD
+        ══════════════════════════════════════════════════════════ */}
+        {view==="dashboard"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+            {/* ═══════════════════════════════════════════════════════
+                SECTION CAPITAL — Palette TradingView
+            ═══════════════════════════════════════════════════════ */}
+            <div style={{background:"#0a0e1a",border:"1px solid rgba(0,180,255,0.15)",borderRadius:14,overflow:"hidden"}}>
+
+              {/* Header bande */}
+              <div style={{background:"#04080f",borderBottom:"1px solid rgba(0,180,255,0.15)",padding:"0 20px",height:46,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:"#00ff88"}}/>
+                  <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",color:"#00ff88"}}>Capital Overview</span>
+                </div>
+                <button onClick={()=>setShowCapitalModal(v=>!v)}
+                  style={{display:"none"}}>
+                  {showCapitalModal?"✕ Fermer":"+ Retrait"}
+                </button>
+              </div>
+
+              <div style={{padding:"16px 20px"}}>
+
+              {/* 3 KPIs : Capital origine · Capital actuel · Retraits */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+
+                <div style={{background:"#04080f",border:"1px solid rgba(0,180,255,0.15)",borderRadius:10,padding:"13px 15px"}}>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(0,200,255,0.4)",marginBottom:7}}>Capital origine</div>
+                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#d1d4dc",lineHeight:1}}>${initialCapital.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                  <div style={{fontSize:10,color:"#8b8e99",marginTop:5}}>Dépôt initial</div>
+                </div>
+
+                <div style={{background:"rgba(0,10,30,0.8)",border:"1px solid "+(currentCapital>=initialCapital?"rgba(0,255,136,0.35)":"rgba(239,83,80,0.35)"),borderRadius:10,padding:"13px 15px",position:"relative",overflow:"hidden"}}>
+                  <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:currentCapital>=initialCapital?"#00ff88":"#ef5350",opacity:.8}}/>
+                  <div style={{position:"absolute",top:8,right:10,fontSize:7,color:"rgba(0,207,255,0.4)",letterSpacing:2,textTransform:"uppercase",fontWeight:700}}>LIVE</div>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"#00cfff",marginBottom:7}}>Capital actuel</div>
+                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#00cfff",lineHeight:1,textShadow:"0 0 10px rgba(0,207,255,0.4)"}}>
+                    ${Math.max(0,currentCapital).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  </div>
+                  <div style={{fontSize:10,color:totalGainPct>=0?"#00ff88":"#ef5350",marginTop:4,fontWeight:700}}>
+                    {initialCapital>0?(totalGainPct>=0?"+":"")+totalGainPct.toFixed(2)+"%":"—"} depuis origine
+                  </div>
+                </div>
+
+                <div style={{background:"#04080f",border:"1px solid "+(totalWithdrawn>0?"#ffaa0040":"rgba(0,180,255,0.15)"),borderRadius:10,padding:"13px 15px",position:"relative",overflow:"hidden"}}>
+                  {totalWithdrawn>0&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,#ffaa00,transparent)",opacity:.8}}/>}
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"#8b8e99",marginBottom:7}}>Retraits effectués</div>
+                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:totalWithdrawn>0?"#ffaa00":"#434651",lineHeight:1}}>
+                    {totalWithdrawn>0?"-":""}${totalWithdrawn.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  </div>
+                  <div style={{fontSize:10,color:"#8b8e99",marginTop:4,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span>{accountWithdrawals.length} retrait{accountWithdrawals.length!==1?"s":""}</span>
+                    {initialCapital>0&&totalWithdrawn>0&&<span style={{color:"#ffaa00",fontWeight:700}}>{(totalWithdrawn/initialCapital*100).toFixed(2)}%</span>}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Formulaire retrait */}
+              {showCapitalModal&&(
+                <div style={{background:"#04080f",border:"1px solid #00ff8830",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                  <div style={{fontSize:9,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",color:"#00ff88",marginBottom:10}}>Enregistrer un retrait</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr auto",gap:10,alignItems:"flex-end"}}>
+                    <div>
+                      <div style={{fontSize:9,color:"#8b8e99",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>Date</div>
+                      <input type="date" value={wdDate} onChange={e=>setWdDate(e.target.value)}
+                        style={{background:"#0a0e1a",border:"1px solid rgba(0,180,255,0.15)",borderRadius:6,color:"#d1d4dc",padding:"7px 10px",fontSize:12,width:"100%",outline:"none",fontFamily:"inherit",colorScheme:"dark"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:"#8b8e99",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>Montant ($)</div>
+                      <input type="number" step="0.01" value={wdAmount} onChange={e=>setWdAmount(e.target.value)} placeholder="0.00"
+                        style={{background:"#0a0e1a",border:"1px solid rgba(0,180,255,0.15)",borderRadius:6,color:"#00cfff",padding:"7px 10px",fontSize:12,width:"100%",outline:"none",fontFamily:"inherit"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:"#8b8e99",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>Note</div>
+                      <input type="text" value={wdNote} onChange={e=>setWdNote(e.target.value)} placeholder="Optionnel..."
+                        style={{background:"#0a0e1a",border:"1px solid rgba(0,180,255,0.15)",borderRadius:6,color:"#d1d4dc",padding:"7px 10px",fontSize:12,width:"100%",outline:"none",fontFamily:"inherit"}}/>
+                    </div>
+                    <button onClick={addWithdrawal} className="btn-cyan" style={{padding:"7px 16px",whiteSpace:"nowrap",fontSize:12}}>+ Ajouter</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Grille 2 colonnes : Bilan mensuel | Détail retraits */}
+              {(monthlyEntries.length>0||accountWithdrawals.length>0)&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:12}}>
+
+                  {/* Tableau mensuel */}
+                  <div style={{background:"#04080f",border:"1px solid rgba(0,180,255,0.15)",borderRadius:10,overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 1fr",padding:"8px 14px",background:"#0a0e1a",borderBottom:"1px solid rgba(0,180,255,0.15)"}}>
+                      {["Mois","P&L trades","P&L net","Croissance","Retraits"].map(h=>(
+                        <div key={h} style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#a8aab4"}}>{h}</div>
+                      ))}
+                    </div>
+                    {(()=>{
+                      const allMonths=[...new Set([...monthlyEntries.map(([m])=>m),...Object.keys(wdByMonth)])].sort();
+                      let rc=initialCapital;
+                      return allMonths.map((ym,idx)=>{
+                        const mPnl=monthlyEntries.find(([m])=>m===ym)?.[1]||0;
+                        const mWd=wdByMonth[ym]||0;
+                        const mNet=mPnl-mWd;
+                        const prev=rc; rc+=mNet;
+                        const mPct=prev>0?(mNet/prev)*100:0;
+                        const mPnlPct=prev>0?(mPnl/prev)*100:0;
+                        const mWdPct=initialCapital>0?(mWd/initialCapital)*100:0;
+                        const [yr,mo]=ym.split("-");
+                        return(
+                          <div key={ym} style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 1fr",padding:"8px 14px",borderBottom:idx<allMonths.length-1?"1px solid #0d1220":"none",background:idx%2===0?"#04080f":"#0a0e1a",alignItems:"center"}}>
+                            <div style={{fontSize:11,color:"#a8aab4",fontWeight:600}}>{MONTH_NAMES[parseInt(mo)-1]+" "+yr}</div>
+                            <div>
+                              <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:mPnl>=0?"#00ff88":"#ef5350"}}>{mPnl>=0?"+":""}{mPnl.toFixed(2)}$</div>
+                              {initialCapital>0&&<div style={{fontSize:9,color:mPnl>=0?"#00ff8880":"#ef535080",marginTop:1}}>{mPnlPct>=0?"+":""}{mPnlPct.toFixed(2)}%</div>}
+                            </div>
+                            <div>
+                              <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:mNet>=0?"#00cfff":"#ef5350"}}>{mNet>=0?"+":""}{mNet.toFixed(2)}$</div>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:5}}>
+                              <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:mPct>=0?"#00ff88":"#ef5350"}}>{mPct>=0?"+":""}{mPct.toFixed(2)}%</span>
+                              <div style={{flex:1,height:3,background:"#0d1220",borderRadius:2,overflow:"hidden",maxWidth:40}}>
+                                <div style={{height:"100%",background:mPct>=0?"#00ff88":"#ef5350",width:Math.min(Math.abs(mPct),100)+"%"}}/>
+                              </div>
+                            </div>
+                            <div>
+                              {mWd>0
+                                ? <><div style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:"#ffaa00"}}>-{mWd.toFixed(2)}$</div>
+                                    {initialCapital>0&&<div style={{fontSize:9,color:"#ffaa0080",marginTop:1}}>-{mWdPct.toFixed(2)}%</div>}</>
+                                : <div style={{fontFamily:"monospace",fontSize:11,color:"rgba(0,180,255,0.15)"}}>—</div>
+                              }
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                    <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 1fr",padding:"9px 14px",background:"#0a0e1a",borderTop:"1px solid #00ff8830"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#00cfff",textTransform:"uppercase",letterSpacing:".06em"}}>Total</div>
+                      <div>
+                        <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:dashStats.totalPnl>=0?"#00ff88":"#ef5350"}}>{dashStats.totalPnl>=0?"+":""}{dashStats.totalPnl.toFixed(2)}$</div>
+                        {initialCapital>0&&<div style={{fontSize:9,color:dashStats.totalPnl>=0?"#00ff8880":"#ef535080",marginTop:1}}>{initialCapital>0?(dashStats.totalPnl>=0?"+":"")+(dashStats.totalPnl/initialCapital*100).toFixed(2)+"%":"—"}</div>}
+                      </div>
+                      <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:netGainAfterWd>=0?"#00cfff":"#ef5350"}}>{netGainAfterWd>=0?"+":""}{netGainAfterWd.toFixed(2)}$</div>
+                      <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:totalGainPct>=0?"#00ff88":"#ef5350"}}>{initialCapital>0?(totalGainPct>=0?"+":"")+totalGainPct.toFixed(2)+"%":"—"}</div>
+                      <div>
+                        {totalWithdrawn>0&&<><div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:"#ffaa00"}}>-{totalWithdrawn.toFixed(2)}$</div>
+                        {initialCapital>0&&<div style={{fontSize:9,color:"#ffaa0080",marginTop:1}}>-{(totalWithdrawn/initialCapital*100).toFixed(2)}%</div>}</>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Détail retraits */}
+                  <div style={{background:"#04080f",border:"1px solid #ffaa0040",borderRadius:10,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"95px 1fr auto",padding:"8px 14px",background:"#0a0e1a",borderBottom:"1px solid rgba(0,180,255,0.15)",gap:8}}>
+                      {["Date","Note","Montant"].map(h=>(
+                        <div key={h} style={{fontSize:9,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#a8aab4"}}>{h}</div>
+                      ))}
+                    </div>
+                    <div style={{flex:1,overflowY:"auto",maxHeight:200}}>
+                      {accountWithdrawals.length===0&&(
+                        <div style={{textAlign:"center",padding:"18px",color:"#8b8e99",fontSize:12}}>Aucun retrait</div>
+                      )}
+                      {accountWithdrawals.map((w,idx)=>(
+                        <div key={w.id} style={{display:"grid",gridTemplateColumns:"95px 1fr auto",padding:"7px 14px",gap:8,borderBottom:idx<accountWithdrawals.length-1?"1px solid #0d1220":"none",background:idx%2===0?"#04080f":"#0a0e1a",alignItems:"center"}}>
+                          <div style={{fontSize:11,color:"#b2b5be",fontFamily:"monospace",fontWeight:600}}>{w.date}</div>
+                          <div style={{fontSize:11,color:"#a8aab4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.note||"—"}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:"#ffaa00"}}>-${Number(w.amount).toFixed(2)}</span>
+                            <button onClick={()=>{
+                              const accId=calAccount==="all"?(Object.entries(withdrawals).find(([,arr])=>arr.some(x=>x.id===w.id))||[])[0]:calAccount;
+                              if(accId)deleteWithdrawal(accId,w.id);
+                            }} style={{background:"transparent",border:"none",color:"#3a2a2a",cursor:"pointer",fontSize:10,padding:0,fontFamily:"inherit"}}>✕</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {accountWithdrawals.length>0&&(
+                      <div style={{display:"grid",gridTemplateColumns:"95px 1fr auto",padding:"8px 14px",gap:8,background:"#0a0e1a",borderTop:"1px solid #ffaa0030"}}>
+                        <div style={{fontSize:10,fontWeight:700,color:"#ffaa00",textTransform:"uppercase",letterSpacing:".06em",gridColumn:"1/3"}}>Total</div>
+                        <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:"#ffaa00"}}>-${totalWithdrawn.toFixed(2)}</div>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+
+              {monthlyEntries.length===0&&accountWithdrawals.length===0&&(
+                <div style={{textAlign:"center",padding:"10px 0",color:"rgba(0,180,255,0.15)",fontSize:12}}>Aucun trade. Sync MT5 ou ajoute des trades manuellement.</div>
+              )}
+
+
+              </div>
+            </div>
+
+            {/* LIGNE 1 — 4 KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+              {card(<>{lbl("Net P&L")}
+                <div style={{fontSize:30,fontWeight:800,color:dashStats.totalPnl>=0?"#00ff88":"#ef5350",fontFamily:"'Space Mono',monospace",lineHeight:1}}>{dashStats.totalPnl>=0?"+":""}{fmtPnl(dashStats.totalPnl)}</div>
+                <div style={{fontSize:11,color:"#8b8e99",marginTop:6}}>{dashStats.closed.length} trades fermés</div>
+                {dashStats.openPnl!==0&&<div style={{fontSize:11,color:"#00ff88",marginTop:3}}>En cours : {dashStats.openPnl>=0?"+":""}${dashStats.openPnl.toFixed(2)}</div>}
+              </>)}
+              {card(<>{lbl("Trade Win %")}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontSize:30,fontWeight:800,color:"#d1d4dc",fontFamily:"'Space Mono',monospace",lineHeight:1}}>{dashStats.winRate.toFixed(1)}%</div>
+                  <Gauge value={dashStats.winRate} max={100} color={dashStats.winRate>=50?"#00ff88":"#ef5350"}/>
+                </div>
+                <div style={{fontSize:11,color:"#8b8e99",marginTop:6}}>{dashStats.wins.length}W &nbsp;·&nbsp; {dashStats.losses.length}L</div>
+              </>)}
+              {card(<>{lbl("Profit Factor")}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontSize:30,fontWeight:800,color:"#d1d4dc",fontFamily:"'Space Mono',monospace",lineHeight:1}}>{dashStats.profitFactor.toFixed(2)}</div>
+                  <Gauge value={Math.min(dashStats.profitFactor,3)} max={3} color={dashStats.profitFactor>=1.5?"#00ff88":dashStats.profitFactor>=1?"#00ff88":"#ef5350"}/>
+                </div>
+                <div style={{fontSize:11,color:"#8b8e99",marginTop:6}}>Gross profit / gross loss</div>
+              </>)}
+              {card(<>{lbl("Day Win %")}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{fontSize:30,fontWeight:800,color:"#d1d4dc",fontFamily:"'Space Mono',monospace",lineHeight:1}}>{dashStats.dayWinRate.toFixed(1)}%</div>
+                  <Gauge value={dashStats.dayWinRate} max={100} color={dashStats.dayWinRate>=50?"#00ff88":"#ef5350"}/>
+                </div>
+                <div style={{fontSize:11,color:"#8b8e99",marginTop:6}}>{dashStats.winDays} jours gagnants</div>
+              </>)}
+            </div>
+
+            {/* LIGNE 2 — Avg W/L + Score + Courbe cumul */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr",gap:12}}>
+              {card(<>{lbl("Avg Win / Loss")}
+                <div style={{fontSize:26,fontWeight:800,color:"#d1d4dc",fontFamily:"monospace",marginBottom:12}}>{(dashStats.avgLoss>0?dashStats.avgWin/dashStats.avgLoss:0).toFixed(2)}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+                  <div style={{flex:dashStats.avgWin||1,height:8,background:"#00ff88",borderRadius:4}}/>
+                  <div style={{flex:dashStats.avgLoss||1,height:8,background:"#ef5350",borderRadius:4}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,color:"#00ff88",fontWeight:600}}>+${dashStats.avgWin.toFixed(0)}</span>
+                  <span style={{fontSize:12,color:"#ef5350",fontWeight:600}}>-${dashStats.avgLoss.toFixed(0)}</span>
+                </div>
+              </>)}
+              {card(<>{lbl("Fucking Score")}
+                <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                  <svg width={140} height={140} style={{flexShrink:0}}>
+                    {[0.25,0.5,0.75,1].map(r=><polygon key={r} points={radarAxes.map((_,i)=>rPt(i,RR*r).join(",")).join(" ")} fill="none" stroke="rgba(0,180,255,0.15)" strokeWidth={1}/>)}
+                    {radarAxes.map((_,i)=>{const[x,y]=rPt(i,RR);return<line key={i} x1={RC} y1={RC} x2={x} y2={y} stroke="rgba(0,180,255,0.15)" strokeWidth={1}/>;  })}
+                    <polygon points={poly} fill="rgba(38,166,154,0.15)" stroke="#00ff88" strokeWidth={2}/>
+                    {vPts.map(([x,y],i)=><circle key={i} cx={x} cy={y} r={3} fill="#00ff88"/>)}
+                    {radarAxes.map((a,i)=>{const[x,y]=rPt(i,RR+14);return<text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={7} fill="#8b8e99">{a.label}</text>;})}
+                  </svg>
+                  <div>
+                    <div style={{fontSize:10,color:"#a8aab4",letterSpacing:1,marginBottom:6}}>SCORE</div>
+                    <div style={{fontSize:44,fontWeight:800,color:zellaScore>=60?"#00ff88":zellaScore>=40?"#00ff88":"#ef5350",fontFamily:"monospace",lineHeight:1}}>{zellaScore}</div>
+                    <div style={{fontSize:11,color:"#8b8e99",marginTop:4}}>/100</div>
+                    <div style={{marginTop:10,background:"#0d1220",borderRadius:3,height:5,width:90}}>
+                      <div style={{height:5,borderRadius:3,width:zellaScore+"%",background:zellaScore>=60?"#00ff88":zellaScore>=40?"#00ff88":"#ef5350"}}/>
+                    </div>
+                    <div style={{fontSize:11,color:zellaScore>=60?"#00ff88":zellaScore>=40?"#00ff88":"#ef5350",marginTop:6,fontWeight:600}}>{zellaScore>=60?"🔥 Excellent":zellaScore>=40?"👍 Correct":"⚠️ À améliorer"}</div>
+                  </div>
+                </div>
+              </>)}
+              {card(<>{lbl("Courbe P&L Cumulatif")}
+                <svg width="100%" height={115} viewBox={"0 0 "+CW+" "+CH} preserveAspectRatio="none" style={{display:"block"}}>
+                  <defs><linearGradient id="cG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={totalPnl>=0?"#00ff88":"#ef5350"} stopOpacity="0.3"/><stop offset="100%" stopColor={totalPnl>=0?"#00ff88":"#ef5350"} stopOpacity="0.02"/></linearGradient></defs>
+                  <line x1={0} y1={CH/2} x2={CW} y2={CH/2} stroke="rgba(0,180,255,0.15)" strokeWidth={0.5} strokeDasharray="4 4"/>
+                  {cumulData.length>1&&<><path d={pa(cPts,CH)} fill="url(#cG)"/><path d={pp(cPts)} fill="none" stroke={totalPnl>=0?"#00ff88":"#ef5350"} strokeWidth={2}/></>}
+                  <text x={2} y={CH-2} fontSize={7} fill="#8b8e99">${cMin.toFixed(0)}</text>
+                  <text x={CW-2} y={8} fontSize={7} fill="#8b8e99" textAnchor="end">${cMax.toFixed(0)}</text>
+                </svg>
+              </>)}
+            </div>
+
+            {/* LIGNE 3 — Camembert + Trades récents + Heatmap */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1.6fr 0.9fr",gap:12}}>
+              {card(<>{lbl("Paires Tradées")}
+                <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <PieChart sz={140}/>
+                  <div style={{flex:1,display:"flex",flexDirection:"column",gap:6,maxHeight:140,overflowY:"auto"}}>
+                    {pairList.slice(0,9).map(([sym,d],i)=>(
+                      <div key={sym} style={{display:"flex",alignItems:"center",gap:5}}>
+                        <div style={{width:7,height:7,borderRadius:2,background:PIE_C[i%PIE_C.length],flexShrink:0}}/>
+                        <div style={{flex:1,fontSize:11,fontWeight:600,color:"#a8aab4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sym}</div>
+                        <div style={{fontSize:10,color:"#8b8e99",marginRight:4}}>{d.count}×</div>
+                        <div style={{fontSize:10,fontFamily:"monospace",fontWeight:700,color:d.pnl>=0?"#00ff88":"#ef5350"}}>{d.pnl>=0?"+":""}${d.pnl.toFixed(0)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>)}
+              {card(<>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  {lbl("Trades Récents")}
+                  <button onClick={()=>setView("calendar")} style={{background:"transparent",border:"none",color:"#8b8e99",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Voir tout →</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"60px 1fr 50px 80px",gap:"4px 8px",paddingBottom:6,borderBottom:"1px solid #1a1a1a",marginBottom:4}}>
+                  {["Date","Symbole","Dir","P&L"].map(h=><div key={h} className="lbl" style={{margin:0}}>{h}</div>)}
+                </div>
+                {accountTrades.slice(0,10).map(t=>(
+                  <div key={t.id} style={{display:"grid",gridTemplateColumns:"60px 1fr 50px 80px",gap:"3px 8px",padding:"5px 0",borderBottom:"1px solid #0d0d0d",alignItems:"center"}}>
+                    <div style={{fontSize:10,color:"#8b8e99",fontFamily:"monospace"}}>{(t.date||"").slice(5)}</div>
+                    <div style={{fontWeight:700,fontSize:12,color:"#d1d4dc",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.symbol}</div>
+                    <div><span style={{background:t.direction==="LONG"?"#0d1f1a":"#1f0d0e",color:t.direction==="LONG"?"#00ff88":"#ef5350",borderRadius:3,padding:"1px 4px",fontSize:9,fontWeight:700}}>{t.direction==="LONG"?"L":"S"}</span></div>
+                    <div style={{fontFamily:"monospace",fontWeight:700,fontSize:11,color:Number(t.pnl)>=0?"#00ff88":"#ef5350"}}>{Number(t.pnl)>=0?"+":""}${Number(t.pnl).toFixed(2)}</div>
+                  </div>
+                ))}
+              </>)}
+              {card(<>{lbl("10 Dernières Semaines")}
+                <div style={{display:"flex",gap:3,marginBottom:6}}>
+                  {["L","M","M","J","V","S","D"].map((d,i)=><div key={i} style={{width:26,textAlign:"center",fontSize:9,color:"#8b8e99",fontWeight:600}}>{d}</div>)}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {heatWeeks.map((week,wi)=>(
+                    <div key={wi} style={{display:"flex",gap:3}}>
+                      {week.map((cell,di)=>{
+                        const isWE=di===5||di===6;
+                        let bg=isWE?"#04080f":"#0d1220";
+                        let border="1px solid rgba(0,180,255,0.08)";
+                        if(cell.data){bg=cell.data.pnl>0?"rgba(0,255,136,0.12)":"rgba(239,83,80,0.12)";border=cell.data.pnl>0?"1px solid rgba(0,255,136,0.3)":"1px solid rgba(239,83,80,0.3)";}
+                        if(cell.date===todayStr){border="2px solid #00ff88";}
+                        return(
+                          <div key={di} title={cell.date+(cell.data?"\n$"+cell.data.pnl.toFixed(2)+" ("+cell.data.count+" trades)":"")}
+                            style={{width:26,height:26,borderRadius:4,background:bg,border,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            {cell.data&&<span style={{fontSize:7,color:cell.data.pnl>0?"#00ff88":"#ef5350",fontWeight:700,fontFamily:"monospace"}}>
+                              {cell.data.pnl>0?"+":""}{Math.abs(cell.data.pnl)>=1000?(cell.data.pnl/1000).toFixed(1)+"K":cell.data.pnl.toFixed(0)}
+                            </span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+                <div style={{marginTop:8,display:"flex",gap:8,alignItems:"center"}}>
+                  <div style={{width:12,height:12,borderRadius:2,background:"rgba(239,83,80,0.12)",border:"1px solid rgba(239,83,80,0.3)"}}/><span style={{fontSize:10,color:"#8b8e99"}}>Perte</span>
+                  <div style={{width:12,height:12,borderRadius:2,background:"rgba(0,255,136,0.12)",border:"1px solid rgba(0,255,136,0.3)"}}/><span style={{fontSize:10,color:"#8b8e99"}}>Gain</span>
+                </div>
+              </>)}
+            </div>
+
+            {/* LIGNE 4 — P&L journalier + Drawdown + Balance */}
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12}}>
+              {card(<>{lbl("P&L Journalier")}
+                <svg width="100%" height={90} viewBox={"0 0 "+CW+" "+CH} preserveAspectRatio="none" style={{display:"block"}}>
+                  <line x1={0} y1={CH/2} x2={CW} y2={CH/2} stroke="rgba(0,180,255,0.15)" strokeWidth={1}/>
+                  {dayEntries.map(([date,d],i)=>{
+                    const n=dayEntries.length,slotW=CW/Math.max(n,1),barW=Math.min(slotW*0.6,18);
+                    const x=(i+0.5)*slotW-barW/2;
+                    const h=Math.max((Math.abs(d.pnl)/dMax)*(CH/2-4),2);
+                    return<rect key={date} x={x} y={d.pnl>=0?CH/2-h:CH/2} width={barW} height={h} fill={d.pnl>=0?"#00ff88":"#ef5350"} opacity={0.85} rx={1}/>;
+                  })}
+                </svg>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                  <span style={{fontSize:10,color:"#8b8e99"}}>{dayEntries.length} jours</span>
+                  <span style={{fontSize:10,fontFamily:"monospace",fontWeight:700,color:totalPnl>=0?"#00ff88":"#ef5350"}}>{totalPnl>=0?"+":""}${totalPnl.toFixed(2)}</span>
+                </div>
+              </>)}
+              {(()=>{
+                let pk=0,mdd=0;
+                const ddPts=cumulData.map((p,i)=>{if(p.cumul>pk)pk=p.cumul;const dd=pk>0?(p.cumul-pk)/pk*100:0;if(dd<mdd)mdd=dd;return{dd};});
+                const ddMin=Math.min(...ddPts.map(d=>d.dd),-1);
+                const dPts2=ddPts.map((d,i)=>[(i/Math.max(ddPts.length-1,1))*CW,((d.dd-0)/(ddMin-0||1))*CH]);
+                return card(<>{lbl("Drawdown")}
+                  <svg width="100%" height={90} viewBox={"0 0 "+CW+" "+CH} preserveAspectRatio="none" style={{display:"block"}}>
+                    <defs><linearGradient id="dG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ef5350" stopOpacity="0"/><stop offset="100%" stopColor="#ef5350" stopOpacity="0.4"/></linearGradient></defs>
+                    {dPts2.length>1&&<><path d={pa(dPts2,CH)} fill="url(#dG)"/><path d={pp(dPts2)} fill="none" stroke="#00ff88" strokeWidth={1.5}/></>}
+                  </svg>
+                  <div style={{fontSize:11,color:"#8b8e99",marginTop:4}}>Max : <span style={{color:"#ef5350",fontWeight:700}}>{mdd.toFixed(1)}%</span></div>
+                </>);
+              })()}
+              {(()=>{
+                let bal=10000;const balD=[{bal}];
+                dayEntries.forEach(([,d])=>{bal+=d.pnl;balD.push({bal});});
+                const bMin=Math.min(...balD.map(d=>d.bal)),bMax=Math.max(...balD.map(d=>d.bal)),bR=bMax-bMin||1;
+                const bPts=balD.map((d,i)=>[(i/Math.max(balD.length-1,1))*CW,CH-((d.bal-bMin)/bR)*CH]);
+                return card(<>{lbl("Account Balance")}
+                  <svg width="100%" height={90} viewBox={"0 0 "+CW+" "+CH} preserveAspectRatio="none" style={{display:"block"}}>
+                    <defs><linearGradient id="bG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#00ff88" stopOpacity="0.3"/><stop offset="100%" stopColor="#00ff88" stopOpacity="0"/></linearGradient></defs>
+                    {balD.length>1&&<><path d={pa(bPts,CH)} fill="url(#bG)"/><path d={pp(bPts)} fill="none" stroke="#00ff88" strokeWidth={2}/></>}
+                    <text x={CW-2} y={8} fontSize={7} fill="#8b8e99" textAnchor="end">${bMax.toFixed(0)}</text>
+                  </svg>
+                </>);
+              })()}
+            </div>
+
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════
+            CALENDRIER
+        ══════════════════════════════════════════════════════════ */}
+        {view==="calendar"&&(
+          <div>
+            {/* Navigation mois */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <button onClick={()=>setCalMonth(m=>{const d=new Date(m.year,m.month-1,1);return{year:d.getFullYear(),month:d.getMonth()};})} style={{background:"transparent",border:"none",color:"#a8aab4",fontSize:22,cursor:"pointer"}}>‹</button>
+                <span style={{fontWeight:700,fontSize:20}}>{MONTH_NAMES[calMonth.month]} {calMonth.year}</span>
+                <button onClick={()=>setCalMonth(m=>{const d=new Date(m.year,m.month+1,1);return{year:d.getFullYear(),month:d.getMonth()};})} style={{background:"transparent",border:"none",color:"#a8aab4",fontSize:22,cursor:"pointer"}}>›</button>
+                <button onClick={()=>setCalMonth({year:new Date().getFullYear(),month:new Date().getMonth()})} style={{background:"#0d1220",border:"1px solid #2a2a2a",borderRadius:6,color:"#a8aab4",padding:"4px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Ce mois</button>
+              </div>
+              <div style={{display:"flex",gap:14,alignItems:"center"}}>
+                <span style={{background:calData.monthPnl>=0?"#0d2318":"#2a1415",color:calData.monthPnl>=0?"#00ff88":"#ef5350",borderRadius:6,padding:"5px 14px",fontWeight:700,fontSize:14,fontFamily:"monospace"}}>{fmtPnl(calData.monthPnl)}</span>
+                <span style={{background:"#0d1220",border:"1px solid #2a2a2a",borderRadius:6,color:"#a8aab4",padding:"5px 12px",fontSize:13}}>{calData.tradingDays} jours</span>
+              </div>
+            </div>
+
+            {/* Grille calendrier */}
+            {(()=>{
+              const wdByDay={};
+              accountWithdrawals.forEach(w=>{if(!wdByDay[w.date])wdByDay[w.date]=0;wdByDay[w.date]+=Number(w.amount);});
+              const wdBySemaine=calData.weeks.map(week=>week.reduce((s,c)=>s+(c?wdByDay[c.dateStr]||0:0),0));
+              const monthDays=Object.values(calData.dayMap);
+              const monthWins=monthDays.filter(d=>d.pnl>0).length;
+              const monthLosses=monthDays.filter(d=>d.pnl<0).length;
+              const monthWdTotal=Object.entries(wdByDay).filter(([dt])=>{const p=dt.split("-");return parseInt(p[0])===calMonth.year&&parseInt(p[1])-1===calMonth.month;}).reduce((s,[,v])=>s+v,0);
+              const monthTradeCount=monthDays.reduce((s,d)=>s+d.count,0);
+              const mWinDays=monthDays.filter(d=>d.pnl>0);
+              const mLossDays=monthDays.filter(d=>d.pnl<0);
+              const monthAvgWin=mWinDays.length?mWinDays.reduce((s,d)=>s+d.pnl,0)/mWinDays.length:0;
+              const monthAvgLoss=mLossDays.length?Math.abs(mLossDays.reduce((s,d)=>s+d.pnl,0)/mLossDays.length):0;
+              const monthWR=calData.tradingDays>0?Math.round(monthWins/calData.tradingDays*100):0;
+              return(<div>
+            <div style={{display:"flex",border:"1px solid rgba(0,180,255,0.15)",borderRadius:"12px 12px 0 0",overflow:"hidden"}}>
+              <div style={{flex:1}}>
+                {/* Header jours */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:"#0a0e1a",borderBottom:"1px solid rgba(0,180,255,0.25)"}}>
+                  {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",padding:"10px 6px",fontSize:11,color:d==="Dim"?"rgba(255,100,100,0.5)":"rgba(0,200,255,0.65)",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>{d}</div>)}
+                </div>
+                {calData.weeks.map((week,wi)=>(
+                  <div key={wi} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+                    {week.map((cell,ci)=>{
+                      const isSun=ci===6;
+                      if(!cell)return<div key={"e"+wi+ci} style={{minHeight:115,background:"#04080f",borderRight:"1px solid rgba(0,180,255,0.06)",borderBottom:"1px solid rgba(0,180,255,0.06)"}}/>;
+                      const{d,dateStr,data}=cell;
+                      const isToday=dateStr===todayStr;
+                      const isSelected=calSelected===dateStr;
+                      const dayWd=wdByDay[dateStr]||0;
+                      // Couleurs nettes gain/perte
+                      let bg="#04080f";
+                      let leftBar="transparent";
+                      if(data&&data.pnl>0){bg="rgba(0,255,136,0.06)";leftBar="#00ff88";}
+                      else if(data&&data.pnl<0){bg="rgba(239,83,80,0.07)";leftBar="#ef5350";}
+                      if(isSelected&&data&&data.pnl>0)bg="rgba(0,255,136,0.13)";
+                      else if(isSelected&&data&&data.pnl<0)bg="rgba(239,83,80,0.14)";
+                      else if(isSelected)bg="#0d1220";
+                      const wr=data?Math.round((data.wins/data.count)*100):0;
+                      return(
+                        <div key={dateStr} className="cal-cell"
+                          onClick={()=>{setCalSelected(isSelected?null:dateStr);setAddingForDate(null);setEditTradeId(null);}}
+                          style={{minHeight:115,background:bg,borderRight:"1px solid rgba(0,180,255,0.06)",borderBottom:"1px solid rgba(0,180,255,0.06)",padding:"10px 10px 10px 14px",cursor:"pointer",position:"relative",outline:isSelected?"2px solid #00ff88":"none",outlineOffset:-2,borderLeft:data?"3px solid "+leftBar:"1px solid rgba(0,180,255,0.06)"}}>
+                          {/* Numéro jour */}
+                          <div style={{fontSize:12,color:isToday?"#00ff88":isSun?"rgba(255,140,140,0.7)":data?"#d1d4dc":"rgba(0,200,255,0.55)",fontWeight:isToday?800:600,marginBottom:7,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                            <span>{d}</span>
+                            {isToday&&<span style={{fontSize:7,color:"#00ff88",letterSpacing:1,fontWeight:700}}>TODAY</span>}
+                          </div>
+                          {data&&<>
+                            <div style={{fontSize:16,fontWeight:800,color:data.pnl>=0?"#00ff88":"#ef5350",fontFamily:"'Space Mono',monospace",marginBottom:5,letterSpacing:-0.5}}>{data.pnl>=0?"+":""}{data.pnl.toFixed(2)}$</div>
+                            <div style={{fontSize:11,color:"#b2b5be",fontWeight:500,marginBottom:2}}>{data.count} trade{data.count>1?"s":""}</div>
+                            <div style={{fontSize:11,fontWeight:700,color:data.pnl>=0?"rgba(0,255,136,0.7)":"rgba(239,83,80,0.7)"}}>{wr}% win</div>
+                          </>}
+                          {dayWd>0&&(
+                            <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:1}}>
+                              <span style={{fontSize:9,color:"rgba(255,170,0,0.6)",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>Retrait</span>
+                              <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:"#ffaa00"}}>-${dayWd.toFixed(0)}$</span>
+                              {initialCapital>0&&<span style={{fontSize:9,color:"rgba(255,170,0,0.5)"}}>-{(dayWd/initialCapital*100).toFixed(1)}%</span>}
+                            </div>
+                          )}
+                          {isToday&&<div style={{position:"absolute",top:8,right:8,width:5,height:5,borderRadius:"50%",background:"#00ff88",boxShadow:"0 0 8px #00ff88"}}/>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              {/* Colonne RETRAIT + TOTAL SEM */}
+              <div style={{width:140,background:"#04080f",borderLeft:"1px solid rgba(255,170,0,0.2)",display:"flex",flexDirection:"column"}}>
+                {/* Header */}
+                <div style={{background:"#0a0e1a",borderBottom:"1px solid rgba(0,180,255,0.25)",padding:"10px 6px",textAlign:"center",height:41,display:"flex",flexDirection:"column",justifyContent:"center",gap:2}}>
+                  <div style={{fontSize:9,color:"#ffaa00",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>Semaine</div>
+                  <div style={{fontSize:8,color:"rgba(255,170,0,0.4)",letterSpacing:1}}>P&amp;L · Retrait</div>
+                </div>
+                {calData.weekSummaries.map((ws,wi)=>{
+                  const wWd=wdBySemaine[wi];
+                  const wWdPct=initialCapital>0?(wWd/initialCapital*100):0;
+                  return(
+                  <div key={wi} style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"10px 12px",borderBottom:"1px solid rgba(0,180,255,0.06)",minHeight:115,background:ws.pnl>0?"rgba(0,255,136,0.03)":ws.pnl<0?"rgba(239,83,80,0.03)":"#04080f"}}>
+                    <div style={{fontSize:9,color:"rgba(0,200,255,0.55)",marginBottom:4,fontWeight:700,letterSpacing:1}}>SEM. {ws.weekNum}</div>
+                    {/* Total P&L semaine */}
+                    <div style={{fontFamily:"'Space Mono',monospace",fontSize:14,fontWeight:800,color:ws.tradeDays===0?"rgba(0,200,255,0.5)":ws.pnl>=0?"#00ff88":"#ef5350",marginBottom:2}}>
+                      {ws.tradeDays===0?"—":(ws.pnl>=0?"+":"")+ws.pnl.toFixed(2)+"$"}
+                    </div>
+                    {ws.tradeDays>0&&initialCapital>0&&(
+                      <div style={{fontSize:9,color:ws.pnl>=0?"rgba(0,255,136,0.4)":"rgba(239,83,80,0.4)",marginBottom:ws.tradeDays>0?4:0}}>
+                        {ws.pnl>=0?"+":""}{(ws.pnl/initialCapital*100).toFixed(2)}%
+                      </div>
+                    )}
+                    {/* Séparateur + retraits */}
+                    {wWd>0&&<>
+                      <div style={{height:"1px",background:"rgba(255,170,0,0.2)",margin:"6px 0"}}/>
+                      <div style={{fontSize:9,color:"rgba(255,170,0,0.6)",fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:2}}>Retrait</div>
+                      <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,fontWeight:700,color:"#ffaa00"}}>-${wWd.toFixed(0)}$</div>
+                      {initialCapital>0&&<div style={{fontSize:9,color:"rgba(255,170,0,0.5)",marginTop:1}}>-{wWdPct.toFixed(2)}%</div>}
+                    </>}
+                    {wWd===0&&ws.tradeDays===0&&<div style={{fontSize:9,color:"rgba(0,180,255,0.25)"}}>—</div>}
+                  </div>);})}
+              </div>
+            </div>
+            {/* ── BARRE STATS MENSUELLE ── */}
+            <div style={{background:"#0a0e1a",border:"1px solid #1e1e1e",borderTop:"none",borderRadius:"0 0 12px 12px",padding:"10px 20px",display:"grid",gridTemplateColumns:"repeat(8,1fr)"}}>
+              {[
+                {lbl:"P&L Mois",val:(calData.monthPnl>=0?"+":"")+calData.monthPnl.toFixed(2)+"$",c:calData.monthPnl>=0?"#00ff88":"#ef5350"},
+                {lbl:"Jours tradés",val:calData.tradingDays+" j",c:"#d1d4dc"},
+                {lbl:"Jours vert",val:monthWins+" j",c:"#00ff88"},
+                {lbl:"Jours rouge",val:monthLosses+" j",c:"#ef5350"},
+                {lbl:"Win rate",val:monthWR+"%",c:monthWR>=50?"#00ff88":"#ef5350"},
+                {lbl:"Nb trades",val:monthTradeCount+" trades",c:"#d1d4dc"},
+                {lbl:"Moy gain/j",val:monthAvgWin>0?"+$"+monthAvgWin.toFixed(0):"—",c:"#00ff88"},
+                {lbl:"Retraits mois",val:monthWdTotal>0?"-$"+monthWdTotal.toFixed(0)+(initialCapital>0?" · "+(monthWdTotal/initialCapital*100).toFixed(1)+"%":""):"—",c:monthWdTotal>0?"#ffaa00":"#434651"},
+              ].map((s,i)=>(
+                <div key={i} style={{textAlign:"center",padding:"4px 8px",borderRight:i<7?"1px solid rgba(0,180,255,0.08)":"none"}}>
+                  <div style={{fontSize:8,color:"#a8aab4",letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>{s.lbl}</div>
+                  <div style={{fontFamily:"'Space Mono',monospace",fontSize:11,fontWeight:700,color:s.c}}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+            </div>);})()}
+
+            {/* Détail du jour sélectionné */}
+            {calSelected&&(
+              <div style={{marginTop:16,background:"#0a0e1a",border:"1px solid #1e1e1e",borderRadius:12,padding:"20px 24px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:13,color:"#a8aab4",marginBottom:4}}>{new Date(calSelected+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+                    {calData.dayMap[calSelected]&&(
+                      <div>
+                        <div style={{fontSize:26,fontWeight:800,fontFamily:"monospace",color:calData.dayMap[calSelected].pnl>=0?"#00ff88":"#ef5350"}}>{calData.dayMap[calSelected].pnl>=0?"+":""}${calData.dayMap[calSelected].pnl.toFixed(2)}</div>
+                        <div style={{fontSize:13,color:"#a8aab4",marginTop:4}}>{calData.dayMap[calSelected].count} trade{calData.dayMap[calSelected].count>1?"s":""} · {Math.round(calData.dayMap[calSelected].wins/calData.dayMap[calSelected].count*100)}% win</div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button className="btn-ghost" onClick={()=>{setCalSelected(null);}}>✕</button>
+                  </div>
+                </div>
+
+                {/* Liste des trades du jour (lecture seule) */}
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {(calData.dayMap[calSelected]?.trades||[]).map(t=>(
+                    <div key={t.id}>
+                        <div style={{background:"#04080f",border:"1px solid "+(t.pnl>=0?"#1e3a28":"#3a1e1e"),borderRadius:10,padding:"14px 16px"}}>
+                          <div>
+                            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                              <span style={{fontWeight:700,fontSize:15}}>{t.symbol}</span>
+                              <span style={{background:t.direction==="LONG"?"#0d1f1a":"#1f0d0e",color:t.direction==="LONG"?"#00ff88":"#ef5350",borderRadius:4,padding:"2px 7px",fontSize:11,fontWeight:700}}>{t.direction}</span>
+                              {t.status==="OPEN"&&<span style={{background:Number(t.pnl)>=0?"#0d1f1a":"#1f0d0e",color:Number(t.pnl)>=0?"#00ff88":"#ef5350",borderRadius:4,padding:"2px 7px",fontSize:10,fontWeight:700}}>OPEN</span>}
+                              <span style={{fontFamily:"monospace",fontWeight:700,fontSize:14,color:t.pnl>=0?"#00ff88":"#ef5350",marginLeft:"auto"}}>{t.pnl>=0?"+":""}${Number(t.pnl).toFixed(2)}</span>
+                            </div>
+                            <div style={{fontSize:12,color:"#a8aab4",display:"flex",gap:12,flexWrap:"wrap"}}>
+                              {t.strategy&&<span>{t.strategy}</span>}
+                              {t.session&&<span>{t.session}</span>}
+                              {t.rr>0&&<span>{t.rr}R</span>}
+                              {t.emotion&&<span>{t.emotion}</span>}
+                              {t.size>0&&<span>{t.size} lot{t.size>1?"s":""}</span>}
+                            </div>
+                            {t.notes&&<div style={{fontSize:11,color:"#a8aab4",marginTop:4,fontStyle:"italic"}}>{t.notes}</div>}
+                          </div>
+                        </div>
+                    </div>
+                  ))}
+                  {(!calData.dayMap[calSelected]||calData.dayMap[calSelected].trades.length===0)&&(
+                    <div style={{textAlign:"center",padding:"20px 0",color:"rgba(0,200,255,0.6)",fontSize:13}}>Aucun trade ce jour.</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── FIN DES VUES (version publique) ── */}
+
+      </div>
+
+      {/* Lightbox */}
+      {lightbox&&(
+        <div onClick={()=>setLightbox(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.93)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out",padding:32}}>
+          <img src={lightbox} alt="" style={{maxWidth:"100%",maxHeight:"90vh",borderRadius:12,border:"1px solid #333"}}/>
+          <div style={{position:"absolute",top:20,right:24,color:"#a8aab4",fontSize:28,cursor:"pointer"}}>✕</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
